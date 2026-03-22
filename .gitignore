@@ -1,0 +1,32 @@
+# Nuxt
+.nuxt
+.output
+.data
+dist
+.cache
+
+# Node
+node_modules
+.pnp
+.pnp.js
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Rust / Tauri
+src-tauri/target
+src-tauri/gen
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea
