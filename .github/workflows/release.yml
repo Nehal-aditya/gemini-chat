@@ -29,7 +29,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'pnpm'
 
       - name: Setup Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -43,7 +42,7 @@ jobs:
           key: windows-x64
 
       - name: Install Node dependencies
-        run: pnpm install
+        run: pnpm install --no-frozen-lockfile
 
       - name: Build Tauri app (x64)
         run: pnpm tauri:build:x64
@@ -76,7 +75,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'pnpm'
 
       - name: Setup Rust stable + ARM64 target
         uses: dtolnay/rust-toolchain@stable
@@ -90,7 +88,7 @@ jobs:
           key: windows-arm64
 
       - name: Install Node dependencies
-        run: pnpm install
+        run: pnpm install --no-frozen-lockfile
 
       - name: Build Tauri app (ARM64)
         run: pnpm tauri:build
