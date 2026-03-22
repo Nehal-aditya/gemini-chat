@@ -1,0 +1,230 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'           # triggers on any tag like v1.0.0, v1.2.3, etc.
+  workflow_dispatch:   # allow manual trigger from GitHub Actions UI
+
+permissions:
+  contents: write      # needed to create GitHub Releases and upload assets
+
+jobs:
+
+  # ── Build Windows x64 ──────────────────────────────────────────────────────
+  build-windows-x64:
+    name: Build · Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: windows-x64
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build Tauri app (x64)
+        run: npm run tauri:build:x64
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Upload x64 installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-installer
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+  # ── Build Windows ARM64 ────────────────────────────────────────────────────
+  build-windows-arm64:
+    name: Build · Windows ARM64
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust stable + ARM64 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: windows-arm64
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build Tauri app (ARM64)
+        run: npm run tauri:build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Upload ARM64 installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-arm64-installer
+          path: src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+  # ── Create GitHub Release ──────────────────────────────────────────────────
+  release:
+    name: Publish Release
+    needs: [build-windows-x64, build-windows-arm64]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for source archives
+
+      - name: Download x64 installer
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-x64-installer
+          path: release-assets/
+
+      - name: Download ARM64 installer
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-arm64-installer
+          path: release-assets/
+
+      - name: Get version from tag
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION="v$(date +'%Y%m%d')-dev"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: List release assets
+        run: ls -lh release-assets/
+
+      - name: Rename installers to include version + arch
+        run: |
+          cd release-assets
+          for f in *.exe; do
+            if echo "$f" | grep -qi "arm64"; then
+              mv "$f" "Gemini-Chat-${{ steps.version.outputs.version }}-windows-arm64-setup.exe"
+            else
+              mv "$f" "Gemini-Chat-${{ steps.version.outputs.version }}-windows-x64-setup.exe"
+            fi
+          done
+          ls -lh
+
+      - name: Create source archives
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+
+          # .zip — exclude build artifacts and node_modules
+          zip -r "release-assets/Gemini-Chat-${VERSION}-source.zip" . \
+            --exclude "*.git*" \
+            --exclude "node_modules/*" \
+            --exclude "src-tauri/target/*" \
+            --exclude ".nuxt/*" \
+            --exclude "dist/*" \
+            --exclude ".output/*" \
+            --exclude "release-assets/*"
+
+          # .tar.gz
+          tar --exclude='.git' \
+              --exclude='node_modules' \
+              --exclude='src-tauri/target' \
+              --exclude='.nuxt' \
+              --exclude='dist' \
+              --exclude='.output' \
+              --exclude='release-assets' \
+              -czf "release-assets/Gemini-Chat-${VERSION}-source.tar.gz" .
+
+          ls -lh release-assets/
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          cat << NOTES > release_notes.md
+          ## Gemini Chat ${VERSION}
+
+          A modern AI chat desktop app powered by Google Gemini — built with Nuxt 3 + Tauri 2.
+
+          ### Downloads
+
+          | File | Platform | Description |
+          |------|----------|-------------|
+          | \`Gemini-Chat-${VERSION}-windows-x64-setup.exe\` | Windows 10/11 x64 | Standard Intel/AMD laptops |
+          | \`Gemini-Chat-${VERSION}-windows-arm64-setup.exe\` | Windows 11 ARM64 | Surface Pro X, Snapdragon laptops |
+
+          ### Installation
+
+          1. Download the installer for your platform above
+          2. Run the \`.exe\` — installs for current user, no admin required
+          3. Launch **Gemini Chat** from Start Menu
+          4. Open **Settings** and enter your [Google AI Studio API key](https://aistudio.google.com/apikey)
+
+          ### Supported Gemini Models
+
+          - Gemini 3.1 Pro · Gemini 3 Flash
+          - Gemini 2.5 Pro · Gemini 2.5 Flash ⭐ default
+          - Gemini 2.0 Flash · Gemini 2.0 Flash Lite
+          - Gemini 1.5 Pro · Gemini 1.5 Flash
+
+          ### Requirements
+
+          - Windows 10/11 (x64) or Windows 11 (ARM64)
+          - [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) — included in Windows 11 by default
+          - A Google Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey) (free tier available)
+
+          ---
+
+          > **Note:** Your API key and conversations are stored locally on your machine and never sent to any server other than the Google Gemini API.
+          NOTES
+          echo "Release notes generated"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Gemini Chat ${{ steps.version.outputs.version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, 'dev') || contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') }}
+          files: |
+            release-assets/Gemini-Chat-${{ steps.version.outputs.version }}-windows-x64-setup.exe
+            release-assets/Gemini-Chat-${{ steps.version.outputs.version }}-windows-arm64-setup.exe
+            release-assets/Gemini-Chat-${{ steps.version.outputs.version }}-source.zip
+            release-assets/Gemini-Chat-${{ steps.version.outputs.version }}-source.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
