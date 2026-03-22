@@ -3,11 +3,11 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'           # triggers on any tag like v1.0.0, v1.2.3, etc.
-  workflow_dispatch:   # allow manual trigger from GitHub Actions UI
+      - 'v*'
+  workflow_dispatch:
 
 permissions:
-  contents: write      # needed to create GitHub Releases and upload assets
+  contents: write
 
 jobs:
 
@@ -20,11 +20,16 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: 'pnpm'
 
       - name: Setup Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -38,10 +43,10 @@ jobs:
           key: windows-x64
 
       - name: Install Node dependencies
-        run: npm ci
+        run: pnpm install
 
       - name: Build Tauri app (x64)
-        run: npm run tauri:build:x64
+        run: pnpm tauri:build:x64
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -62,11 +67,16 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: 'pnpm'
 
       - name: Setup Rust stable + ARM64 target
         uses: dtolnay/rust-toolchain@stable
@@ -80,10 +90,10 @@ jobs:
           key: windows-arm64
 
       - name: Install Node dependencies
-        run: npm ci
+        run: pnpm install
 
       - name: Build Tauri app (ARM64)
-        run: npm run tauri:build
+        run: pnpm tauri:build
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -105,7 +115,7 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # full history for source archives
+          fetch-depth: 0
 
       - name: Download x64 installer
         uses: actions/download-artifact@v4
@@ -130,9 +140,6 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
 
-      - name: List release assets
-        run: ls -lh release-assets/
-
       - name: Rename installers to include version + arch
         run: |
           cd release-assets
@@ -149,7 +156,6 @@ jobs:
         run: |
           VERSION=${{ steps.version.outputs.version }}
 
-          # .zip — exclude build artifacts and node_modules
           zip -r "release-assets/Gemini-Chat-${VERSION}-source.zip" . \
             --exclude "*.git*" \
             --exclude "node_modules/*" \
@@ -159,7 +165,6 @@ jobs:
             --exclude ".output/*" \
             --exclude "release-assets/*"
 
-          # .tar.gz
           tar --exclude='.git' \
               --exclude='node_modules' \
               --exclude='src-tauri/target' \
@@ -172,7 +177,6 @@ jobs:
           ls -lh release-assets/
 
       - name: Generate release notes
-        id: release_notes
         run: |
           VERSION=${{ steps.version.outputs.version }}
           cat << NOTES > release_notes.md
@@ -182,36 +186,26 @@ jobs:
 
           ### Downloads
 
-          | File | Platform | Description |
-          |------|----------|-------------|
-          | \`Gemini-Chat-${VERSION}-windows-x64-setup.exe\` | Windows 10/11 x64 | Standard Intel/AMD laptops |
-          | \`Gemini-Chat-${VERSION}-windows-arm64-setup.exe\` | Windows 11 ARM64 | Surface Pro X, Snapdragon laptops |
+          | File | Platform |
+          |------|----------|
+          | \`Gemini-Chat-${VERSION}-windows-x64-setup.exe\` | Windows 10/11 x64 (Intel/AMD) |
+          | \`Gemini-Chat-${VERSION}-windows-arm64-setup.exe\` | Windows 11 ARM64 (Snapdragon/Surface) |
 
           ### Installation
 
           1. Download the installer for your platform above
           2. Run the \`.exe\` — installs for current user, no admin required
-          3. Launch **Gemini Chat** from Start Menu
-          4. Open **Settings** and enter your [Google AI Studio API key](https://aistudio.google.com/apikey)
-
-          ### Supported Gemini Models
-
-          - Gemini 3.1 Pro · Gemini 3 Flash
-          - Gemini 2.5 Pro · Gemini 2.5 Flash ⭐ default
-          - Gemini 2.0 Flash · Gemini 2.0 Flash Lite
-          - Gemini 1.5 Pro · Gemini 1.5 Flash
+          3. Launch **Gemini Chat** from the Start Menu
+          4. Click **Settings** and enter your [Google AI Studio API key](https://aistudio.google.com/apikey)
 
           ### Requirements
 
-          - Windows 10/11 (x64) or Windows 11 (ARM64)
-          - [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) — included in Windows 11 by default
-          - A Google Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey) (free tier available)
+          - Windows 10/11 x64 or Windows 11 ARM64
+          - WebView2 Runtime (built into Windows 11; [download for Windows 10](https://developer.microsoft.com/en-us/microsoft-edge/webview2/))
+          - A free [Gemini API key](https://aistudio.google.com/apikey)
 
-          ---
-
-          > **Note:** Your API key and conversations are stored locally on your machine and never sent to any server other than the Google Gemini API.
+          > Your API key and conversations are stored locally and never sent anywhere except the Google Gemini API.
           NOTES
-          echo "Release notes generated"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
